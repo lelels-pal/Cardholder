@@ -1,0 +1,48 @@
+name: cardikeep
+description: "CardiKeep - Keep your heart close."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_map: ^8.2.2
+  flutter_svg: ^2.2.3
+  geolocator: ^14.0.2
+  google_fonts: ^6.3.3
+  http: ^1.2.0
+  intl: ^0.20.2
+  latlong2: ^0.9.1
+  mobile_scanner: ^7.1.4
+  path_provider: ^2.1.5
+  url_launcher: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/Image.jpeg"
+  min_sdk_android: 21 # android min sdk min:16, default 21
+  web:
+    generate: true
+    image_path: "assets/Image.jpeg"
+    background_color: "#hex_code"
+    theme_color: "#hex_code"
+  windows:
+    generate: true
+    image_path: "assets/Image.jpeg"
+    icon_size: 48 # min:48, max:256, default: 48
+  macos:
+    generate: true
+    image_path: "assets/Image.jpeg"
+
+flutter:
+  uses-material-design: true

@@ -3,6 +3,7 @@ import '../constants.dart';
 import '../main.dart';
 import 'signup_screen.dart';
 import '../services/auth_service.dart';
+import '../services/secure_storage_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -48,6 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (user != null) {
+      await SecureStorageService.setCredentials(username, password);
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => MainLayout(user: user)),
@@ -88,9 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   labelStyle: const TextStyle(color: AppColors.textSecondary),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: AppColors.textSecondary,
-                    ),
+                    borderSide: const BorderSide(color: AppColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -110,9 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   labelStyle: const TextStyle(color: AppColors.textSecondary),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: AppColors.textSecondary,
-                    ),
+                    borderSide: const BorderSide(color: AppColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),

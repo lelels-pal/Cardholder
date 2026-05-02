@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../constants.dart';
 import '../services/tracker_service.dart';
+import '../services/secure_storage_service.dart';
 
 class TrackingScreen extends StatefulWidget {
   final String deviceImei;
@@ -16,11 +18,8 @@ class TrackingScreen extends StatefulWidget {
 class _TrackingScreenState extends State<TrackingScreen> {
   final MapController _mapController = MapController();
 
-  // Traccar Credentials - TODO: Move to secure storage in production
-  final _trackerService = TrackerService(
-    username: 'pallorinaleoangelo@gmail.com',
-    password: 'sentra1234',
-  );
+  // Traccar Credentials loaded from secure storage
+  TrackerService? _trackerService;
 
   bool _isLoading = false;
   Timer? _timer;
@@ -30,17 +29,32 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   void initState() {
     super.initState();
-    _startLocationUpdates();
+    _initTracker();
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _trackerService.dispose();
-    super.dispose();
+  Future<void> _initTracker() async {
+    try {
+      final creds = await SecureStorageService.getCredentials();
+      if (mounted) {
+        setState(() {
+          _trackerService = TrackerService(
+            username: creds['username']!,
+            password: creds['password']!,
+          );
+        });
+        _startLocationUpdates();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load credentials: $e';
+        });
+      }
+    }
   }
 
   void _startLocationUpdates() {
+    if (_trackerService == null) return;
     // Fetch immediately
     _fetchLocation();
 
@@ -51,9 +65,17 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _trackerService?.dispose();
+    super.dispose();
+  }
+
   Future<void> _fetchLocation() async {
+    if (_trackerService == null) return;
     try {
-      final position = await _trackerService.getDevicePosition(
+      final position = await _trackerService!.getDevicePosition(
         widget.deviceImei,
       );
       if (mounted) {
@@ -83,7 +105,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
     final String action = turnOn ? 'activated' : 'deactivated';
 
     try {
-      await _trackerService.sendHexCommand(widget.deviceImei, hexCommand);
+      if (_trackerService == null) throw Exception('Tracker not initialized');
+      await _trackerService!.sendHexCommand(widget.deviceImei, hexCommand);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -119,7 +142,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
             return Center(child: Text('Error: $_error'));
           }
 
-          if (_currentLocation == null) {
+          if (_trackerService == null || _currentLocation == null) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -137,7 +160,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 children: [
                   TileLayer(
                     urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                    subdomains: const ['a', 'b', 'c', 'd'],
                     userAgentPackageName: 'com.sentra.cardholder',
                   ),
                   CircleLayer(
@@ -206,7 +230,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                             label: const Text('BUZZER OFF'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 15),
-                              backgroundColor: Colors.grey[700],
+                              backgroundColor: AppColors.textSecondary,
                               foregroundColor: Colors.white,
                             ),
                           ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'tracking_screen.dart';
+import '../services/device_service.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -26,8 +27,8 @@ class _ScanScreenState extends State<ScanScreen> {
       });
 
       try {
-        // TODO: Implement your own backend API call here to link the device
-        // For now, we just navigate to the tracking screen with the scanned IMEI
+        final deviceService = DeviceService();
+        await deviceService.linkDevice(imei);
         
         if (!mounted) return;
 

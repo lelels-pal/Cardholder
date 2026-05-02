@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:developer' as developer;
 import 'package:path_provider/path_provider.dart';
 import '../models/user_model.dart';
 
@@ -26,7 +27,7 @@ class AuthService {
       final List<dynamic> jsonList = jsonDecode(contents);
       return jsonList.map((json) => User.fromJson(json)).toList();
     } catch (e) {
-      print('Error reading users: $e');
+      developer.log('Error reading users', name: 'AuthService', error: e);
       return [];
     }
   }

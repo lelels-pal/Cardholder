@@ -18,7 +18,7 @@ class SettingsScreen extends StatelessWidget {
             const Text(
               'Settings',
               style: TextStyle(
-                color: Colors.white,
+                color: AppColors.textPrimary,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
@@ -26,7 +26,7 @@ class SettingsScreen extends StatelessWidget {
             const SizedBox(height: 8),
             const Text(
               'Manage your account and preferences',
-              style: TextStyle(color: Colors.grey, fontSize: 14),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
             ),
             const SizedBox(height: 32),
 
@@ -37,7 +37,14 @@ class SettingsScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.cardBackground,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                border: Border.all(color: AppColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.shadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -60,7 +67,7 @@ class SettingsScreen extends StatelessWidget {
                   Text(
                     user.username,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: AppColors.textPrimary,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
@@ -68,10 +75,13 @@ class SettingsScreen extends StatelessWidget {
                   const SizedBox(height: 4),
                   const Text(
                     'Card Holder',
-                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 24),
-                  const Divider(color: Colors.white10),
+                  const Divider(color: AppColors.border),
                   const SizedBox(height: 24),
 
                   _buildInfoRow('Username', user.username),
@@ -117,11 +127,14 @@ class SettingsScreen extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+        Text(
+          label,
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+        ),
         Text(
           value,
           style: const TextStyle(
-            color: Colors.white,
+            color: AppColors.textPrimary,
             fontWeight: FontWeight.w500,
             fontSize: 14,
           ),

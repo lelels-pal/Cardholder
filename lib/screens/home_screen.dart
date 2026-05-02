@@ -7,7 +7,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart'; // Add import
 import '../constants.dart';
 import '../services/tracker_service.dart';
-import '../widgets/status_card.dart';
+import '../services/secure_storage_service.dart';
+import '../widgets/top_notification_modal.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,15 +21,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final MapController _mapController = MapController();
 
   // Traccar Credentials
-  final _trackerService = TrackerService(
-    username: 'pallorinaleoangelo@gmail.com',
-    password: 'sentra1234',
-  );
+  TrackerService? _trackerService;
 
   bool _isLoading = false;
+  bool _isRefreshing = false;
+  bool _buzzerOn = false;
   Timer? _timer;
   Map<String, double>? _currentLocation;
   String? _error;
+  DateTime? _lastUpdateTime;
 
   // Anti-Loss State
   bool _antiLossEnabled = false;
@@ -47,13 +48,34 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _checkLocationPermission(); // Check permission on start
-    _startLocationUpdates();
+    _initTracker();
+  }
+
+  Future<void> _initTracker() async {
+    try {
+      final creds = await SecureStorageService.getCredentials();
+      if (mounted) {
+        setState(() {
+          _trackerService = TrackerService(
+            username: creds['username']!,
+            password: creds['password']!,
+          );
+        });
+        _startLocationUpdates();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load credentials: $e';
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-    _trackerService.dispose();
+    _trackerService?.dispose();
     super.dispose();
   }
 
@@ -72,9 +94,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _fetchLocation() async {
+  Future<void> _fetchLocation({bool recenterMap = false}) async {
+    if (_isRefreshing) return;
+
+    if (recenterMap) {
+      setState(() {
+        _isRefreshing = true;
+      });
+    }
+
     try {
-      final position = await _trackerService.getDevicePosition(_deviceImei);
+      if (_trackerService == null) return;
+      final position = await _trackerService!.getDevicePosition(_deviceImei);
 
       if (mounted) {
         final bool isFirstLoad = _currentLocation == null;
@@ -104,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _currentLocation = position;
           _lastUserPosition = userPosition; // Store for debug display
+          _lastUpdateTime = DateTime.now();
           _error = null;
 
           if (userPosition != null &&
@@ -123,12 +155,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Cap the counter so it doesn't grow indefinitely
                 _consecutiveFarReadings = 3;
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('⚠️ Alert: Device is too far away!'),
-                    backgroundColor: Colors.red,
-                    duration: Duration(seconds: 2),
-                  ),
+                TopNotificationModal.show(
+                  context,
+                  message: '⚠️ Alert: Device is too far away!',
+                  backgroundColor: Colors.red,
+                  duration: const Duration(seconds: 2),
+                  icon: Icons.warning,
                 );
               }
             } else {
@@ -138,7 +170,9 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
 
-        if (isFirstLoad && position['lat'] != null && position['lng'] != null) {
+        if ((isFirstLoad || recenterMap) &&
+            position['lat'] != null &&
+            position['lng'] != null) {
           _mapController.move(LatLng(position['lat']!, position['lng']!), 15.0);
         }
       }
@@ -146,6 +180,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _error = e.toString();
+        });
+      }
+    } finally {
+      if (mounted && recenterMap) {
+        setState(() {
+          _isRefreshing = false;
         });
       }
     }
@@ -160,9 +200,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final String action = turnOn ? 'activated' : 'deactivated';
 
     try {
-      await _trackerService.sendHexCommand(_deviceImei, hexCommand);
+      if (_trackerService == null) throw Exception('Tracker not initialized');
+      
+      // Check connection status before sending
+      if (_getGpsStatusText() == 'Disconnected') {
+        throw Exception('Cannot send command: Device is disconnected');
+      }
+
+      await _trackerService!.sendHexCommand(_deviceImei, hexCommand);
 
       if (!mounted) return;
+      setState(() {
+        _buzzerOn = turnOn;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Buzzer $action successfully!'),
@@ -238,6 +288,43 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Helper methods for GPS status
+  String _getGpsStatusText() {
+    if (_error != null) {
+      return 'Error';
+    }
+    if (_currentLocation == null) {
+      return 'Searching...';
+    }
+    if (_lastUpdateTime != null) {
+      final difference = DateTime.now().difference(_lastUpdateTime!);
+      if (difference.inSeconds < 120) {
+        return 'Connected';
+      } else {
+        return 'Disconnected';
+      }
+    }
+    return 'Connected';
+  }
+
+  Color _getGpsStatusColor() {
+    if (_error != null) {
+      return Colors.red;
+    }
+    if (_currentLocation == null) {
+      return Colors.grey;
+    }
+    if (_lastUpdateTime != null) {
+      final difference = DateTime.now().difference(_lastUpdateTime!);
+      if (difference.inSeconds < 120) {
+        return AppColors.primary;
+      } else {
+        return Colors.orange;
+      }
+    }
+    return AppColors.primary;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Determine map center and marker position
@@ -253,314 +340,576 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Map Area (Moved to top)
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
+      child: Column(
+        children: [
+          // Anti-Loss Mode Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                // Anti-Loss Icon and Text
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    Icons.security,
+                    color: _antiLossEnabled
+                        ? AppColors.primary
+                        : AppColors.textSecondary,
+                    size: 16,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'ANTI-LOSS MODE',
+                    style: TextStyle(
+                      color: _antiLossEnabled
+                          ? AppColors.primary
+                          : AppColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Spacer(),
+                // Distance Display
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Distance:',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 9,
+                      ),
+                    ),
+                    Text(
+                      _distance != null && _antiLossEnabled
+                          ? (_distance! >= 1000
+                                ? '${(_distance! / 1000).toStringAsFixed(1)}km'
+                                : '${_distance!.toStringAsFixed(0)}m')
+                          : '--',
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(30),
-                  child: Stack(
-                    children: [
-                      FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: displayCenter,
-                          initialZoom: 15.0,
-                        ),
-                        children: [
-                          ColorFiltered(
-                            colorFilter: ColorFilter.matrix(<double>[
-                              1.3, 0, 0, 0, 20, // R scale + offset
-                              0, 1.3, 0, 0, 20, // G scale + offset
-                              0, 0, 1.3, 0, 20, // B scale + offset
-                              0, 0, 0, 1, 0, // Alpha
-                            ]),
-                            child: TileLayer(
-                              urlTemplate:
-                                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                              subdomains: const ['a', 'b', 'c', 'd'],
-                              userAgentPackageName: 'com.sentra.app',
-                            ),
-                          ),
-                          if (_currentLocation != null) ...[
-                            CircleLayer(
-                              circles: [
-                                CircleMarker(
-                                  point: displayCenter,
-                                  radius: accuracy ?? 100,
-                                  useRadiusInMeter: true,
-                                  color: AppColors.primary.withValues(
-                                    alpha: 0.2,
-                                  ),
-                                  borderColor: AppColors.primary,
-                                  borderStrokeWidth: 2,
-                                ),
-                              ],
-                            ),
-                            MarkerLayer(
-                              markers: [
-                                Marker(
-                                  point: displayCenter,
-                                  width: 80,
-                                  height: 80,
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: AppColors.primary,
-                                        width: 2,
-                                      ),
-                                      color: AppColors.primary.withValues(
-                                        alpha: 0.15,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.my_location,
-                                      color: AppColors.primary,
-                                      size: 30,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-
-                      // Location Info Overlay
-                      Positioned(
-                        bottom: 20,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.cardBackground.withValues(
-                                alpha: 0.9,
-                              ),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.1),
-                              ),
-                            ),
-                            child: Text(
-                              _error != null
-                                  ? 'Error connecting'
-                                  : (_currentLocation != null
-                                        ? 'Location Found'
-                                        : 'Searching...'),
-                              style: const TextStyle(
-                                color: Colors
-                                    .white, // Changed to white for better contrast
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Status Cards
-            Row(
-              children: [
-                StatusCard(
-                  title: 'Module Battery',
-                  value: _currentLocation != null
-                      ? '${_currentLocation!['batteryLevel']}%'
-                      : '...',
-                  icon: Icons.battery_full,
-                  iconColor: _currentLocation != null
-                      ? (_currentLocation!['batteryLevel']! > 20
-                            ? AppColors.primary
-                            : Colors.red)
-                      : Colors.grey,
-                ),
-                const SizedBox(width: 16),
-                StatusCard(
-                  title: 'LTE Signal',
-                  value: _currentLocation != null
-                      ? '${_currentLocation!['rssi']!.toInt()} dBm'
-                      : '...',
-                  icon: Icons.signal_cellular_alt,
-                  iconColor: _currentLocation != null
-                      ? (_currentLocation!['rssi']! > -100
-                            ? Colors.blue
-                            : Colors.orange)
-                      : Colors.grey,
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Navigation Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _currentLocation == null ? null : _openMaps,
-                icon: const Icon(Icons.directions, color: Colors.white),
-                label: const Text(
-                  'NAVIGATE TO DEVICE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 4,
-                  shadowColor: AppColors.primary.withValues(alpha: 0.4),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Buzzer Controls
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isLoading
-                        ? null
-                        : () => _sendBuzzerCommand(true),
-                    icon: const Icon(Icons.volume_up, color: Colors.white),
-                    label: const Text(
-                      'BUZZER ON',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.redAccent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isLoading
-                        ? null
-                        : () => _sendBuzzerCommand(false),
-                    icon: const Icon(Icons.volume_off, color: Colors.white),
-                    label: const Text(
-                      'BUZZER OFF',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.grey[700],
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Anti-Loss Toggle
-            Container(
-              height:
-                  56, // Match standard button height (approx 56px with padding)
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: AppColors.cardBackground,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.security,
-                    color: _antiLossEnabled ? AppColors.primary : Colors.grey,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Anti-Loss Mode',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        if (_distance != null && _antiLossEnabled)
-                          Text(
-                            'Distance: ${_distance!.toStringAsFixed(1)}m',
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 10,
-                              height: 1.0,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Switch(
+                const SizedBox(width: 8),
+                // Anti-Loss Toggle
+                Transform.scale(
+                  scale: 0.85,
+                  child: Switch(
                     value: _antiLossEnabled,
                     onChanged: (value) {
                       setState(() {
                         _antiLossEnabled = value;
                         if (!value) {
-                          _distance = null; // Reset distance if disabled
+                          _distance = null;
                         }
                       });
                     },
-                    activeColor: AppColors.primary,
+                    activeThumbColor: AppColors.primary,
+                    activeTrackColor: AppColors.primary.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Debug Info (only shown when anti-loss enabled and data available)
+          if (_antiLossEnabled &&
+              _currentLocation != null &&
+              _lastUserPosition != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              child: Text(
+                'DEBUG: Phone: ${_lastUserPosition!.latitude.toStringAsFixed(5)}, ${_lastUserPosition!.longitude.toStringAsFixed(5)} | Tracker: ${_currentLocation!['lat']?.toStringAsFixed(5)}, ${_currentLocation!['lng']?.toStringAsFixed(5)}',
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 8,
+                  fontFamily: 'monospace',
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+          // Map Area
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.border, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.shadow,
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Stack(
+                  children: [
+                    FlutterMap(
+                      mapController: _mapController,
+                      options: MapOptions(
+                        initialCenter: displayCenter,
+                        initialZoom: 15.0,
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate:
+                              'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                          subdomains: const ['a', 'b', 'c', 'd'],
+                          userAgentPackageName: 'com.sentra.app',
+                        ),
+                        if (_currentLocation != null) ...[
+                          CircleLayer(
+                            circles: [
+                              CircleMarker(
+                                point: displayCenter,
+                                radius: accuracy ?? 100,
+                                useRadiusInMeter: true,
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.15,
+                                ),
+                                borderColor: AppColors.primary,
+                                borderStrokeWidth: 2,
+                              ),
+                            ],
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                point: displayCenter,
+                                width: 60,
+                                height: 60,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppColors.primary,
+                                      width: 3,
+                                    ),
+                                    color: AppColors.primary.withValues(
+                                      alpha: 0.2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.my_location,
+                                    color: AppColors.primary,
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+
+                    // Location Status Overlay
+                    Positioned(
+                      bottom: 16,
+                      left: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardBackground.withValues(
+                            alpha: 0.95,
+                          ),
+                          borderRadius: BorderRadius.circular(25),
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.shadow,
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          _error != null
+                              ? 'Error connecting'
+                              : (_currentLocation != null
+                                    ? 'Location Found'
+                                    : 'Searching...'),
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Refresh Button
+                    Positioned(
+                      bottom: 16,
+                      right: 16,
+                      child: GestureDetector(
+                        onTap: _isRefreshing
+                            ? null
+                            : () => _fetchLocation(recenterMap: true),
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: AppColors.cardBackground.withValues(
+                              alpha: 0.95,
+                            ),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppColors.border,
+                              width: 1,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.shadow,
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: _isRefreshing
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      AppColors.primary,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.refresh,
+                                  color: AppColors.primary,
+                                  size: 26,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Status Cards Row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                // Module Battery Card
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.battery_full,
+                            color: _currentLocation != null && _getGpsStatusText() != 'Disconnected'
+                                ? (_currentLocation!['batteryLevel']! > 20
+                                      ? AppColors.primary
+                                      : Colors.red)
+                                : AppColors.textSecondary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Module Battery',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _currentLocation != null && _getGpsStatusText() != 'Disconnected'
+                                    ? '${_currentLocation!['batteryLevel']?.toStringAsFixed(1)}%'
+                                    : '...',
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // LTE Signal Card
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.signal_cellular_alt,
+                            color: _currentLocation != null && _getGpsStatusText() != 'Disconnected'
+                                ? (_currentLocation!['rssi']! > -100
+                                      ? Colors.blue
+                                      : Colors.orange)
+                                : AppColors.textSecondary,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'LTE Signal',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _currentLocation != null && _getGpsStatusText() != 'Disconnected'
+                                    ? '${_currentLocation!['rssi']!.toInt()} dBm'
+                                    : 'N/A',
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Navigate Button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _currentLocation == null || _getGpsStatusText() == 'Disconnected' ? null : _openMaps,
+                icon: const Icon(Icons.diamond, color: Colors.white, size: 18),
+                label: const Text(
+                  'NAVIGATE TO DEVICE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Alarm and GPS Status Row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Alarm Toggle
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: _buzzerOn
+                            ? LinearGradient(
+                                colors: [
+                                  Colors.red.withValues(alpha: 0.8),
+                                  Colors.redAccent.withValues(alpha: 0.6),
+                                ],
+                              )
+                            : null,
+                        color: _buzzerOn ? null : AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _buzzerOn
+                                  ? Colors.white.withValues(alpha: 0.2)
+                                  : Colors.red.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.volume_up,
+                              color: _buzzerOn ? Colors.white : Colors.red,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'ALARM',
+                              style: TextStyle(
+                                color: _buzzerOn
+                                    ? Colors.white
+                                    : AppColors.textPrimary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Transform.scale(
+                            scale: 0.8,
+                            child: Switch(
+                              value: _buzzerOn,
+                              onChanged: _isLoading || _getGpsStatusText() == 'Disconnected'
+                                  ? null
+                                  : (value) => _sendBuzzerCommand(value),
+                              activeThumbColor: Colors.white,
+                              activeTrackColor: AppColors.primary,
+                              inactiveThumbColor: AppColors.textSecondary,
+                              inactiveTrackColor: AppColors.border,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // GPS Status
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardBackground,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: _getGpsStatusColor().withValues(
+                                alpha: 0.2,
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.gps_fixed,
+                              color: _getGpsStatusColor(),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  'GPS STATUS',
+                                  style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _getGpsStatusText(),
+                                  style: TextStyle(
+                                    color: _getGpsStatusColor(),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            if (_antiLossEnabled &&
-                _currentLocation != null &&
-                _lastUserPosition != null)
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  'DEBUG:\nPhone: ${_lastUserPosition!.latitude.toStringAsFixed(5)}, ${_lastUserPosition!.longitude.toStringAsFixed(5)}\nTracker: ${_currentLocation!['lat']?.toStringAsFixed(5)}, ${_currentLocation!['lng']?.toStringAsFixed(5)}',
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }

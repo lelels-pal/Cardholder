@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'package:http/http.dart' as http;
 
 /// Service class for communicating with the Traccar API.
@@ -10,7 +11,7 @@ import 'package:http/http.dart' as http;
 /// - Send hex commands to devices
 class TrackerService {
   /// Traccar server base URL
-  static const String _baseUrl = 'https://demo3.traccar.org';
+  static const String _baseUrl = 'https://demo.traccar.org';
 
   /// HTTP client for making requests (allows for testing/mocking)
   final http.Client _client;
@@ -165,7 +166,10 @@ class TrackerService {
         // We take the last one in the list which is typically the most recent in Traccar API responses for specific device queries
         // Actually, /api/positions?deviceId=X returns the latest position(s).
         final latestPosition = positions.last;
-        print('DEBUG ATTRIBUTES: ${latestPosition['attributes']}');
+        developer.log(
+          'Position attributes: ${latestPosition['attributes']}',
+          name: 'TrackerService',
+        );
 
         return {
           'lat': (latestPosition['latitude'] as num).toDouble(),

@@ -49,7 +49,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (user != null) {
-      await SecureStorageService.setCredentials(username, password);
+      await SecureStorageService.setCredentials(username, password); // stores app login
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

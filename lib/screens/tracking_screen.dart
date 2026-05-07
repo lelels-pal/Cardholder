@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../constants.dart';
 import '../services/tracker_service.dart';
-import '../services/secure_storage_service.dart';
+import '../services/config_service.dart';
 
 class TrackingScreen extends StatefulWidget {
   final String deviceImei;
@@ -34,12 +35,24 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
   Future<void> _initTracker() async {
     try {
-      final creds = await SecureStorageService.getCredentials();
+      final config = await ConfigService.getTraccarConfig();
+      final username = config['username'];
+      final password = config['password'];
+
+      if (username == null || password == null || username.isEmpty || password.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _error = 'Traccar credentials not configured. Please set them in Settings.';
+          });
+        }
+        return;
+      }
+
       if (mounted) {
         setState(() {
           _trackerService = TrackerService(
-            username: creds['username']!,
-            password: creds['password']!,
+            username: username,
+            password: password,
           );
         });
         _startLocationUpdates();
@@ -74,24 +87,36 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
   Future<void> _fetchLocation() async {
     if (_trackerService == null) return;
+    final imei = widget.deviceImei.trim();
     try {
-      final position = await _trackerService!.getDevicePosition(
-        widget.deviceImei,
-      );
+      final position = await _trackerService!.getDevicePosition(imei);
       if (mounted) {
         setState(() {
           _currentLocation = position;
           _error = null;
         });
-
-        // Optional: Move map to new location if it's the first update
-        // _mapController.move(LatLng(position['lat']!, position['lng']!), 15);
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e.toString();
-        });
+        // Try to get all devices for debugging
+        try {
+          final devices = await _trackerService!.getAllDevices();
+          developer.log('Available devices: $devices', name: 'TrackingScreen');
+          if (devices.isEmpty) {
+            setState(() {
+              _error = 'No devices found. Check Traccar credentials or device registration. '
+                  'The IMEI "$imei" was not found on this Traccar account.';
+            });
+          } else {
+            setState(() {
+              _error = 'Device "$imei" not found. Available devices: ${devices.map((d) => d['name']).join(', ')}. Error: $e';
+            });
+          }
+        } catch (debugError) {
+          setState(() {
+            _error = '$e';
+          });
+        }
       }
     }
   }
@@ -106,7 +131,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
     try {
       if (_trackerService == null) throw Exception('Tracker not initialized');
-      await _trackerService!.sendHexCommand(widget.deviceImei, hexCommand);
+      await _trackerService!.sendHexCommand(widget.deviceImei.trim(), hexCommand);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -139,7 +164,26 @@ class _TrackingScreenState extends State<TrackingScreen> {
       body: Builder(
         builder: (context) {
           if (_error != null && _currentLocation == null) {
-            return Center(child: Text('Error: $_error'));
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Error: $_error',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _initTracker,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            );
           }
 
           if (_trackerService == null || _currentLocation == null) {

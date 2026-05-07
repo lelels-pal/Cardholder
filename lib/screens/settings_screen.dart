@@ -3,10 +3,15 @@ import '../constants.dart';
 import 'login_screen.dart';
 import '../models/user_model.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   final User user;
   const SettingsScreen({super.key, required this.user});
 
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -65,7 +70,7 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    user.username,
+                    widget.user.username,
                     style: const TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 20,
@@ -84,13 +89,12 @@ class SettingsScreen extends StatelessWidget {
                   const Divider(color: AppColors.border),
                   const SizedBox(height: 24),
 
-                  _buildInfoRow('Username', user.username),
-                  // Removed Email and Change Password as requested
-                ],
-              ),
-            ),
+                   _buildInfoRow('Username', widget.user.username),
+                 ],
+               ),
+             ),
 
-            const SizedBox(height: 48), // Spacer to push logout down
+             const SizedBox(height: 32),
 
             SizedBox(
               width: double.infinity,
@@ -129,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
       children: [
         Text(
           label,
-          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
         ),
         Text(
           value,

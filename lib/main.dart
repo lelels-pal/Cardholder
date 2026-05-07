@@ -10,7 +10,7 @@ import 'screens/history_screen.dart';
 import 'models/user_model.dart';
 import 'models/history_entry.dart';
 import 'services/database_service.dart';
-import 'services/secure_storage_service.dart';
+import 'services/config_service.dart';
 import 'services/tracker_service.dart';
 import 'providers/connectivity_provider.dart';
 import 'widgets/connectivity_overlay.dart';
@@ -23,9 +23,9 @@ void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     if (task == _kTaskLogPosition) {
       try {
-        final credentials = await SecureStorageService.getCredentials();
-        final username = credentials['username'] ?? '';
-        final password = credentials['password'] ?? '';
+        final config = await ConfigService.getTraccarConfig();
+        final username = config['username'] ?? '';
+        final password = config['password'] ?? '';
 
         if (username.isEmpty || password.isEmpty) {
           return false;
@@ -112,7 +112,7 @@ class _MainLayoutState extends State<MainLayout> {
       Workmanager().registerPeriodicTask(
         'history-logging-task',
         _kTaskLogPosition,
-        frequency: const Duration(minutes: 30),
+        frequency: const Duration(minutes: 15),
         constraints: Constraints(networkType: NetworkType.connected),
       );
     }

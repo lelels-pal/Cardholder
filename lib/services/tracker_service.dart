@@ -11,7 +11,7 @@ import 'package:http/http.dart' as http;
 /// - Send hex commands to devices
 class TrackerService {
   /// Traccar server base URL
-  static const String _baseUrl = 'https://demo.traccar.org';
+  static const String _baseUrl = 'https://demo3.traccar.org';
 
   /// HTTP client for making requests (allows for testing/mocking)
   final http.Client _client;
@@ -29,8 +29,10 @@ class TrackerService {
     required String password,
     http.Client? client,
   }) : _authHeader =
-           'Basic ${base64Encode(utf8.encode('$username:$password'))}',
-       _client = client ?? http.Client();
+            'Basic ${base64Encode(utf8.encode('$username:$password'))}',
+        _client = client ?? http.Client() {
+    developer.log('Initializing TrackerService for user: $username', name: 'TrackerService');
+  }
 
   /// Standard headers for API requests
   Map<String, String> get _headers => {
@@ -53,21 +55,36 @@ class TrackerService {
       '$_baseUrl/api/devices',
     ).replace(queryParameters: {'uniqueId': imei});
 
+    developer.log(
+      'Getting device ID for IMEI: $imei from $uri',
+      name: 'TrackerService',
+    );
+
     try {
       final response = await _client.get(uri, headers: _headers);
 
+      developer.log(
+        'Device lookup response: ${response.statusCode} - ${response.body}',
+        name: 'TrackerService',
+      );
+
       if (response.statusCode == 200) {
         final List<dynamic> devices = jsonDecode(response.body);
+        developer.log(
+          'Found ${devices.length} devices',
+          name: 'TrackerService',
+        );
 
         if (devices.isEmpty) {
           throw TraccarException(
-            'Device not found with IMEI: $imei',
+            'Device not found with IMEI: $imei. Ensure the device is registered and transmitting to the Traccar server.',
             statusCode: 404,
           );
         }
 
         // Return the first matching device's ID
         final deviceId = devices[0]['id'] as int;
+        developer.log('Using device ID: $deviceId', name: 'TrackerService');
         return deviceId;
       } else if (response.statusCode == 401) {
         throw TraccarException(
@@ -76,13 +93,17 @@ class TrackerService {
         );
       } else {
         throw TraccarException(
-          'Failed to get device: ${response.reasonPhrase}',
+          'Failed to get device: ${response.statusCode} - ${response.body}',
           statusCode: response.statusCode,
         );
       }
     } on TraccarException {
       rethrow;
     } catch (e) {
+      developer.log(
+        'Traccar API Error in getDeviceId: $e',
+        name: 'TrackerService',
+      );
       throw TraccarException('Network error: $e');
     }
   }
@@ -134,6 +155,10 @@ class TrackerService {
     } on TraccarException {
       rethrow;
     } catch (e) {
+      developer.log(
+        'Traccar API Error in sendHexCommand: $e',
+        name: 'TrackerService',
+      );
       throw TraccarException('Network error: $e');
     }
   }
@@ -144,30 +169,44 @@ class TrackerService {
   ///
   /// Returns a Map containing 'lat', 'lng', 'accuracy', 'batteryLevel', and 'rssi'.
   Future<Map<String, double>> getDevicePosition(String imei) async {
+    developer.log('Getting position for IMEI: $imei', name: 'TrackerService');
     final deviceId = await getDeviceId(imei);
+    developer.log(
+      'Device ID: $deviceId, fetching position',
+      name: 'TrackerService',
+    );
+
     final uri = Uri.parse(
       '$_baseUrl/api/positions',
-    ).replace(queryParameters: {'deviceId': deviceId.toString()});
+    ).replace(queryParameters: {'deviceId': deviceId.toString(), 'limit': '1'});
+
+    developer.log('Position URI: $uri', name: 'TrackerService');
 
     try {
       final response = await _client.get(uri, headers: _headers);
 
+      developer.log(
+        'Position response: ${response.statusCode}',
+        name: 'TrackerService',
+      );
+
       if (response.statusCode == 200) {
         final List<dynamic> positions = jsonDecode(response.body);
+        developer.log(
+          'Positions received: ${positions.length}',
+          name: 'TrackerService',
+        );
 
         if (positions.isEmpty) {
           throw TraccarException(
-            'No position data found for device: $imei',
+            'No position data found for device: $imei. The device may not have reported a location yet.',
             statusCode: 404,
           );
         }
 
-        // Traccar returns a list of positions, usually the latest one first or just one
-        // We take the last one in the list which is typically the most recent in Traccar API responses for specific device queries
-        // Actually, /api/positions?deviceId=X returns the latest position(s).
         final latestPosition = positions.last;
         developer.log(
-          'Position attributes: ${latestPosition['attributes']}',
+          'Position data: lat=${latestPosition['latitude']}, lng=${latestPosition['longitude']}, accuracy=${latestPosition['accuracy']}',
           name: 'TrackerService',
         );
 
@@ -196,14 +235,35 @@ class TrackerService {
         );
       } else {
         throw TraccarException(
-          'Failed to get position: ${response.reasonPhrase}',
+          'Failed to get position: ${response.statusCode} - ${response.body}',
           statusCode: response.statusCode,
         );
       }
     } on TraccarException {
       rethrow;
     } catch (e) {
+      developer.log(
+        'Traccar API Error in getDevicePosition: $e',
+        name: 'TrackerService',
+      );
       throw TraccarException('Network error: $e');
+    }
+  }
+
+  /// Gets all accessible devices from Traccar server.
+  /// Useful for debugging to see what devices are available.
+  Future<List<Map<String, dynamic>>> getAllDevices() async {
+    final uri = Uri.parse('$_baseUrl/api/devices');
+
+    try {
+      final response = await _client.get(uri, headers: _headers);
+
+      if (response.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(jsonDecode(response.body));
+      }
+      return [];
+    } catch (e) {
+      return [];
     }
   }
 

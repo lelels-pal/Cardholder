@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# APK files
+*.apk
+
+# AI generated plans (kilocode)
+.kilo/
+plans/
+
+# Markdown files except README.md
+*.md
+!README.md

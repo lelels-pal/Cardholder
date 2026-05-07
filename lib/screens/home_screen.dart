@@ -7,7 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart'; // Add import
 import '../constants.dart';
 import '../services/tracker_service.dart';
-import '../services/secure_storage_service.dart';
+import '../services/config_service.dart';
 import '../widgets/top_notification_modal.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -53,7 +53,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initTracker() async {
     try {
-      final creds = await SecureStorageService.getCredentials();
+      final hasTraccar = await ConfigService.hasTraccarConfig();
+      if (!hasTraccar) {
+        if (mounted) {
+          setState(() {
+            _error =
+                'Traccar credentials not set. Go to Settings → Tracker Config to set up your account.';
+          });
+        }
+        return;
+      }
+
+      final creds = await ConfigService.getTraccarConfig();
       if (mounted) {
         setState(() {
           _trackerService = TrackerService(
@@ -66,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to load credentials: $e';
+          _error = 'Failed to load tracker credentials: $e';
         });
       }
     }
@@ -104,7 +115,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      if (_trackerService == null) return;
+      if (_trackerService == null) {
+        // If tracker isn't initialized yet (e.g. credentials were just saved),
+        // try re-initializing before giving up.
+        if (recenterMap) await _initTracker();
+        if (_trackerService == null) return;
+      }
       final position = await _trackerService!.getDevicePosition(_deviceImei);
 
       if (mounted) {
@@ -201,11 +217,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       if (_trackerService == null) throw Exception('Tracker not initialized');
-      
-      // Check connection status before sending
-      if (_getGpsStatusText() == 'Disconnected') {
-        throw Exception('Cannot send command: Device is disconnected');
-      }
 
       await _trackerService!.sendHexCommand(_deviceImei, hexCommand);
 
@@ -213,19 +224,21 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _buzzerOn = turnOn;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Buzzer $action successfully!'),
-          backgroundColor: Colors.green,
-        ),
+      TopNotificationModal.show(
+        context,
+        message: 'Alarm $action successfully!',
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+        icon: Icons.check_circle,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to send command: $e'),
-          backgroundColor: Colors.red,
-        ),
+      TopNotificationModal.show(
+        context,
+        message: 'Failed to send command: $e',
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+        icon: Icons.error,
       );
     } finally {
       if (mounted) {
@@ -834,7 +847,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             scale: 0.8,
                             child: Switch(
                               value: _buzzerOn,
-                              onChanged: _isLoading || _getGpsStatusText() == 'Disconnected'
+                              onChanged: _isLoading || _trackerService == null
                                   ? null
                                   : (value) => _sendBuzzerCommand(value),
                               activeThumbColor: Colors.white,

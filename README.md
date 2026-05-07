@@ -15,11 +15,11 @@ The CardiKeep platform is powered by two main components that communicate togeth
   - Secure user authentication and onboarding (including Didit KYC verification and password recovery).
   - Remote device management, such as toggling alarms and registering device IMEIs.
 
-### 2. Web Dashboard (Website)
-- **Role**: Provides an expanded, browser-based tracking interface and administrative portal.
+### 2. Visual Studio Code
+- **Role**: Main IDE to code the different app components.
 - **Key Features**:
-  - Accessible from any desktop or mobile browser for broader device management.
-  - Allows users to oversee multiple devices simultaneously and review detailed tracking history on a larger interface.
+  - Allows users to code and edit changes for the application and the backend connection.
+  - Allows users to oversee multiple code changes for faster tracking of changes.
   - Stays perfectly synced with the mobile app through a shared backend infrastructure.
 
 ### 3. Tracking Engine (Server)

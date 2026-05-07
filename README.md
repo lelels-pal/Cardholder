@@ -4,7 +4,7 @@ CardiKeep is a comprehensive device management and location tracking ecosystem. 
 
 ## Ecosystem Overview
 
-The CardiKeep platform is powered by three main components that communicate together to provide a seamless tracking experience:
+The CardiKeep platform is powered by two main components that communicate together to provide a seamless tracking experience:
 
 ### 1. Mobile Application (App)
 - **Technology**: Built with Flutter (Dart) for iOS and Android.
